@@ -1,0 +1,4 @@
+name = "CommonDataRepresentation"
+uuid = "5745e74d-9b67-4dca-900d-1ebc0736396a"
+authors = ["Tracy Wadleigh <tracy.wadleigh@gmail.com>"]
+version = "0.1.0"
