@@ -2,16 +2,12 @@ module CommonDataRepresentation
 
 export CdrBuffer, buffer, bytes
 export Endianness, BigEndian, LittleEndian, HostEndian
-export alignment, unsafe_read_sequence, unsafe_write_sequence
+export alignment, unsafe_read_many, unsafe_write_many
 
-@enum Endianness BigEndian LittleEndian HostEndian
+@enum Endianness BigEndian LittleEndian 
+const HostEndian = Base.ENDIAN_BOM == 0x04030201 ? LittleEndian : BigEndian
 
-const HOST_IS_LE = Base.ENDIAN_BOM == 0x04030201
-function requireswap(endianness::Endianness)
-  endianness == HostEndian && return false
-  endianness == BigEndian && return !HOST_IS_LE
-  endianness == LittleEndian && return HOST_IS_LE
-end
+requireswap(endianness::Endianness) = endianness != HostEndian
 
 mutable struct CdrBuffer
   buf::IOBuffer
@@ -39,14 +35,14 @@ function alignment(pos, size)
   offset > 0 ? size - offset : 0
 end
 
-function swap_in_place!(ptr::Ptr, n::Integer = 1)
+function unsafe_swap_in_place!(ptr::Ptr, n::Integer = 1)
   for ix in 1:n
     Base.unsafe_store!(ptr, bswap(Base.unsafe_load(ptr, ix)), ix)
   end
   nothing
 end
 
-function unsafe_read_sequence(buf::IOBuffer, ptr::Ptr{T}, n::Integer = 1, doswap::Bool = false) where {T}
+function unsafe_read_many(buf::IOBuffer, ptr::Ptr{T}, n::Integer = 1, doswap::Bool = false) where {T}
   size = sizeof(T)
   align = alignment(position(buf),size)
   if align > 0
@@ -54,13 +50,13 @@ function unsafe_read_sequence(buf::IOBuffer, ptr::Ptr{T}, n::Integer = 1, doswap
   end
   unsafe_read(buf, convert(Ptr{UInt8}, ptr), size*n)
   if doswap
-    swap_in_place!(ptr, n)
+    unsafe_swap_in_place!(ptr, n)
   end
 end
 
-function unsafe_write_sequence(buf::IOBuffer, ptr::Ptr{T}, n::Integer = 1, doswap::Bool = false) where {T}
+function unsafe_write_many(buf::IOBuffer, ptr::Ptr{T}, n::Integer = 1, doswap::Bool = false) where {T}
   if doswap
-    swap_in_place!(ptr, n)
+    unsafe_swap_in_place!(ptr, n)
   end
   size = sizeof(T)
   align = alignment(position(buf), size)
@@ -72,17 +68,17 @@ end
 #*** I/O interface
 
 function Base.read!(cdr::CdrBuffer, ref::Ref{T}) where {T}
-  unsafe_read_sequence(cdr.buf, Base.unsafe_convert(Ptr{T}, ref), 1, cdr.doswap)
+  unsafe_read_many(cdr.buf, Base.unsafe_convert(Ptr{T}, ref), 1, cdr.doswap)
   ref
 end
 
 function Base.read!(cdr::CdrBuffer, ref::Ref{NTuple{N,T}}) where {T,N}
-  unsafe_read_sequence(cdr.buf, Base.unsafe_convert(Ptr{T}, ref), N, cdr.doswap)
+  unsafe_read_many(cdr.buf, Base.unsafe_convert(Ptr{T}, ref), N, cdr.doswap)
   ref
 end
 
 function Base.read!(cdr::CdrBuffer, ary::Array{T}) where {T}
-  unsafe_read_sequence(cdr.buf, Base.unsafe_convert(Ptr{T}, ary), length(ary), cdr.doswap)
+  unsafe_read_many(cdr.buf, Base.unsafe_convert(Ptr{T}, ary), length(ary), cdr.doswap)
   ary
 end
 
@@ -92,4 +88,12 @@ function Base.read(cdr::CdrBuffer, ::Type{T}) where {T}
   ref[]
 end
 
-end # module Cdr
+function Base.read(cdr::CdrBuffer, ::Type{String})
+  len = read(cdr, UInt32)
+  bytes = Vector{UInt8}(undef, len)
+  read!(cdr, bytes)
+  nbytes = bytes[end] == 0x0 ? len-1 : len
+  unsafe_string(Base.unsafe_convert(Ptr{UInt8}, bytes), nbytes)
+end
+
+end # module CommonDataRepresentation
